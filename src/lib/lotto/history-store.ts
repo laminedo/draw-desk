@@ -2,7 +2,7 @@ import { LottoEngine } from "@/lib/lotto/engine";
 import type { DrawRecord, GameId } from "@/lib/lotto/types";
 
 const DB_NAME = "draw-desk-history";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 function openDb(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === "undefined") return Promise.resolve(null);
@@ -12,9 +12,8 @@ function openDb(): Promise<IDBDatabase | null> {
       req.onupgradeneeded = () => {
         const db = req.result;
         for (const id of ["mega", "powerball", "hit5", "walotto"]) {
-          if (!db.objectStoreNames.contains(id)) {
-            db.createObjectStore(id, { keyPath: "drawDate" });
-          }
+          if (db.objectStoreNames.contains(id)) db.deleteObjectStore(id);
+          db.createObjectStore(id, { keyPath: "id" });
         }
       };
       req.onsuccess = () => resolve(req.result);
@@ -27,6 +26,7 @@ function openDb(): Promise<IDBDatabase | null> {
 
 function toStored(record: DrawRecord) {
   return {
+    id: `${record.drawDate}|${record.key}|${record.doublePlay ? "dp" : "main"}`,
     drawDate: record.drawDate,
     numbers: record.numbers,
     megaBall: record.megaBall,

@@ -29,14 +29,16 @@ export function AnalyzerTab({
     drawsSinceSeen: number;
   }>;
   const mega = analysis.frequency.mega as unknown as typeof white;
-  const valueOf = (item: (typeof white)[0]) =>
-    heatmapMode === "hot"
+  const valueOf = (item?: (typeof white)[0]) => {
+    if (!item) return 0;
+    return heatmapMode === "hot"
       ? item.count
       : heatmapMode === "recent"
         ? item.recentCount
         : item.drawsSinceSeen;
-  const maxW = Math.max(...white.map(valueOf), 1);
-  const maxM = Math.max(...mega.map(valueOf), 1);
+  };
+  const maxW = Math.max(...white.filter(Boolean).map(valueOf), 1);
+  const maxM = Math.max(...mega.filter(Boolean).map(valueOf), 1);
 
   return (
     <div className="space-y-4">
@@ -71,11 +73,11 @@ export function AnalyzerTab({
             ))}
           </div>
         </div>
-        <Heatmap items={white} max={maxW} valueOf={valueOf} />
+        <Heatmap items={white.filter(Boolean)} max={maxW} valueOf={valueOf} />
         {hasBonus && (
           <>
             <h3 className="mt-5 text-sm font-medium text-muted">{config.ballLabel}</h3>
-            <Heatmap items={mega} max={maxM} valueOf={valueOf} />
+            <Heatmap items={mega.filter(Boolean)} max={maxM} valueOf={valueOf} />
           </>
         )}
         <div className="mt-4 flex items-center gap-2 text-[12px] text-muted">

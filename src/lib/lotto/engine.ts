@@ -191,7 +191,9 @@ function normalizeHistoryRow(row, config) {
   if (Array.isArray(lower.numbers)) {
     numbers = lower.numbers.map(Number);
   } else if (Array.isArray(lower.winning_numbers)) {
-    numbers = lower.winning_numbers.map(Number);
+    const parsed = lower.winning_numbers.map(Number);
+    numbers = parsed.slice(0, pick);
+    if (parsed.length > pick) megaBall = parsed[pick];
   } else if (lower.winning_numbers) {
     const parsed = String(lower.winning_numbers).match(/\d+/g)?.map(Number) || [];
     numbers = parsed.slice(0, pick);
@@ -388,14 +390,17 @@ function getAnalysis(records, config) {
     const record = records[drawIndex];
     for (const number of record.numbers) {
       const item = whiteFrequency[number - min];
+      if (!item) continue;
       item.count += 1;
       if (drawIndex < recentWindow) item.recentCount += 1;
       if (!item.lastDrawDate) { item.lastDrawDate = record.drawDate; item.drawsSinceSeen = drawIndex; }
     }
     const megaItem = megaFrequency[record.megaBall - 1];
-    megaItem.count += 1;
-    if (drawIndex < recentWindow) megaItem.recentCount += 1;
-    if (!megaItem.lastDrawDate) { megaItem.lastDrawDate = record.drawDate; megaItem.drawsSinceSeen = drawIndex; }
+    if (megaItem) {
+      megaItem.count += 1;
+      if (drawIndex < recentWindow) megaItem.recentCount += 1;
+      if (!megaItem.lastDrawDate) { megaItem.lastDrawDate = record.drawDate; megaItem.drawsSinceSeen = drawIndex; }
+    }
 
     const sorted = [...record.numbers].sort((a, b) => a - b);
     for (let i = 0; i < sorted.length; i += 1) {
@@ -808,14 +813,17 @@ function buildPatternStats(records, config) {
 
     for (const number of numbers) {
       const item = white[number - min];
+      if (!item) continue;
       item.count += 1;
       item.weightedCount += recencyWeight;
       if (item.drawsSinceSeen === records.length) item.drawsSinceSeen = drawIndex;
     }
     const megaItem = mega[record.megaBall - 1];
-    megaItem.count += 1;
-    megaItem.weightedCount += recencyWeight;
-    if (megaItem.drawsSinceSeen === records.length) megaItem.drawsSinceSeen = drawIndex;
+    if (megaItem) {
+      megaItem.count += 1;
+      megaItem.weightedCount += recencyWeight;
+      if (megaItem.drawsSinceSeen === records.length) megaItem.drawsSinceSeen = drawIndex;
+    }
 
     for (let i = 0; i < numbers.length; i += 1) {
       for (let j = i + 1; j < numbers.length; j += 1) {
@@ -864,6 +872,7 @@ function strategyWhiteWeights(strategyId, stats, config) {
   const weights = new Array(span).fill(1);
   for (let i = 0; i < span; i += 1) {
     const item = stats.white[i];
+    if (!item) continue;
     if (strategyId === 'hot') weights[i] = 0.5 + (item.weightedCount / stats.maxWeightedWhite) * 3;
     else if (strategyId === 'overdue') weights[i] = 0.5 + (item.drawsSinceSeen / stats.maxWhiteGap) * 3;
     else if (strategyId === 'contrarian') {
@@ -878,6 +887,7 @@ function strategyMegaWeights(strategyId, stats, config) {
   const weights = new Array(config.megaMax).fill(1);
   for (let i = 0; i < config.megaMax; i += 1) {
     const item = stats.mega[i];
+    if (!item) continue;
     if (strategyId === 'hot') weights[i] = 0.5 + (item.weightedCount / stats.maxWeightedMega) * 3;
     else if (strategyId === 'overdue' || strategyId === 'contrarian') weights[i] = 0.5 + (item.drawsSinceSeen / stats.maxMegaGap) * 3;
   }
@@ -932,11 +942,13 @@ function scoreCandidate(combo, stats, strategy, config) {
   const lowLabel = `${low}/${config.whitePick - low}`;
   const decades = new Set(numbers.map((n) => Math.floor((n - min) / 10)));
 
+  const whiteAt = (n) => stats.white[n - min];
+  const megaAt = stats.mega[combo.megaBall - 1];
   const components = {
-    frequency: average(numbers.map((n) => stats.white[n - min].weightedCount / stats.maxWeightedWhite)),
-    megaFrequency: stats.mega[combo.megaBall - 1].weightedCount / stats.maxWeightedMega,
-    overdue: average(numbers.map((n) => stats.white[n - min].drawsSinceSeen / stats.maxWhiteGap)),
-    megaOverdue: stats.mega[combo.megaBall - 1].drawsSinceSeen / stats.maxMegaGap,
+    frequency: average(numbers.map((n) => (whiteAt(n)?.weightedCount || 0) / stats.maxWeightedWhite)),
+    megaFrequency: (megaAt?.weightedCount || 0) / stats.maxWeightedMega,
+    overdue: average(numbers.map((n) => (whiteAt(n)?.drawsSinceSeen || 0) / stats.maxWhiteGap)),
+    megaOverdue: (megaAt?.drawsSinceSeen || 0) / stats.maxMegaGap,
     sum: Math.exp(-0.5 * ((sum - stats.averageSum) / stats.sumStdDev) ** 2),
     oddEven: (stats.oddEvenCounts.get(oddLabel) || 0) / Math.max(...stats.oddEvenCounts.values(), 1),
     lowHigh: (stats.lowHighCounts.get(lowLabel) || 0) / Math.max(...stats.lowHighCounts.values(), 1),
@@ -977,7 +989,7 @@ function explainCandidate(combo, stats, config) {
     `${odd} odd / ${config.whitePick - odd} even, ${low} low / ${config.whitePick - low} high.`
   ];
   if (config.megaMax > 1) {
-    notes.push(`${config.ballLabel} ${combo.megaBall}: ${megaItem.count} appearances, ${megaItem.drawsSinceSeen} draws since last seen.`);
+    notes.push(`${config.ballLabel} ${combo.megaBall}: ${megaItem?.count ?? 0} appearances, ${megaItem?.drawsSinceSeen ?? 0} draws since last seen.`);
   }
   notes.push(recurring?.count ? `Strongest internal pair ${recurring.pair} appeared ${recurring.count} times.` : 'No repeated internal pair in loaded history.');
   return notes;

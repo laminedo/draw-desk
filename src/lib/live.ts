@@ -64,7 +64,46 @@ const JACKPOT_NAME_MAP: Record<string, GameId> = {
 
 type CacheEntry<T> = { at: number; value: T };
 const jackpotCache: { current?: CacheEntry<JackpotMap> } = {};
-const JACKPOT_TTL = 15 * 60 * 1000;
+const JACKPOT_TTL = 5 * 60 * 1000;
+
+function setJackpot(data: JackpotMap, key: GameId, raw: string, overwrite = false) {
+  const cleaned = String(raw).replace(/\*/g, "").trim();
+  if (!cleaned) return;
+  const value = cleaned.startsWith("$") ? fmtJackpot(cleaned) : fmtJackpot(`$${cleaned}`);
+  if (!value) return;
+  if (overwrite || !data[key]) data[key] = value;
+}
+
+/** Washington's Lottery homepage lists next estimated prizes for all four games. */
+async function scrapeWaLotteryHome(data: JackpotMap, overwrite = true) {
+  const html = await fetchText("https://www.walottery.com/");
+  if (!html) return;
+  const buckets: { name: string; key: GameId }[] = [
+    { name: "powerball", key: "powerball" },
+    { name: "megamillions", key: "mega" },
+    { name: "lotto", key: "walotto" },
+    { name: "hit5", key: "hit5" },
+  ];
+  for (const { name, key } of buckets) {
+    const m = html.match(
+      new RegExp(`game-bucket-${name}[\\s\\S]{0,900}?<h3[^>]*>\\s*\\$([^<]+)`, "i"),
+    );
+    if (m) setJackpot(data, key, m[1], overwrite);
+  }
+}
+
+async function scrapeWaGamePages(data: JackpotMap) {
+  if (!data.hit5) {
+    const html = await fetchText("https://walottery.com/JackpotGames/Hit5.aspx");
+    const m = html?.match(/Current Cashpot[\s\S]{0,200}?\$([\d,]+)/i);
+    if (m) setJackpot(data, "hit5", m[1]);
+  }
+  if (!data.walotto) {
+    const html = await fetchText("https://walottery.com/JackpotGames/Lotto.aspx");
+    const m = html?.match(/<p class="h1-like">\s*\$([^<]+)/i);
+    if (m) setJackpot(data, "walotto", m[1]);
+  }
+}
 
 async function scrapeLotteryUsaWa(data: JackpotMap) {
   const html = await fetchText("https://www.lotteryusa.com/washington/");
@@ -74,7 +113,7 @@ async function scrapeLotteryUsaWa(data: JackpotMap) {
   let m: RegExpExecArray | null;
   while ((m = re.exec(html))) {
     const key = JACKPOT_NAME_MAP[m[1].trim().toLowerCase()];
-    if (key && !data[key]) data[key] = fmtJackpot(m[2]);
+    if (key) setJackpot(data, key, m[2]);
   }
 }
 
@@ -82,21 +121,12 @@ async function scrapeLotteryNet(data: JackpotMap) {
   const html = await fetchText("https://www.lottery.net/");
   if (!html) return;
   const re =
-    /jackpot-promo\/people\/(mega-millions|powerball)\.png[\s\S]{0,600}?Next Estimated Jackpot[\s\S]{0,200}?\$([\d.]+)\s*(Million|Billion)/gi;
+    /lottery\/(powerball|mega-millions)\.png[\s\S]{0,2200}?nextJackpotAmount">\$([^<]+)/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(html))) {
     const key: GameId = m[1] === "mega-millions" ? "mega" : "powerball";
-    if (!data[key]) data[key] = shortJackpot(m[2], m[3]);
+    setJackpot(data, key, m[2]);
   }
-}
-
-async function fetchPowerballOfficial(data: JackpotMap) {
-  const json = await fetchJson<
-    Array<{ field_prize_amount?: string; field_prize_amount_cash?: string }>
-  >("https://www.powerball.com/api/v1/estimates/powerball?_format=json");
-  const row = Array.isArray(json) ? json[0] : null;
-  const raw = row?.field_prize_amount;
-  if (raw && !data.powerball) data.powerball = fmtJackpot(raw);
 }
 
 async function scrapeMegaMillions(data: JackpotMap) {
@@ -105,20 +135,7 @@ async function scrapeMegaMillions(data: JackpotMap) {
   const m =
     html.match(/Next Estimated Jackpot[\s\S]{0,400}?\$([\d.,]+)\s*(Million|Billion)/i) ||
     html.match(/estimated jackpot[\s\S]{0,200}?\$([\d.,]+)\s*(Million|Billion)/i);
-  if (m && !data.mega) data.mega = shortJackpot(m[1], m[2]);
-}
-
-async function scrapeWaLotteryHome(data: JackpotMap) {
-  const html = await fetchText("https://www.walottery.com/");
-  if (!html) return;
-  const blocks = [
-    { re: /Hit\s*5[\s\S]{0,400}?\$([\d,]+)/i, key: "hit5" as const },
-    { re: /Lotto[\s\S]{0,400}?\$([\d,]+)/i, key: "walotto" as const },
-  ];
-  for (const { re, key } of blocks) {
-    const m = html.match(re);
-    if (m && !data[key]) data[key] = fmtJackpot(`$${m[1]}`);
-  }
+  if (m) setJackpot(data, "mega", `${m[1]} ${m[2]}`);
 }
 
 export const fetchJackpots = createServerFn({ method: "GET" }).handler(async () => {
@@ -126,13 +143,16 @@ export const fetchJackpots = createServerFn({ method: "GET" }).handler(async () 
   if (cached && Date.now() - cached.at < JACKPOT_TTL) return cached.value;
 
   const data: JackpotMap = { fetchedAt: new Date().toISOString() };
+  // Official WA board first so aggregator sites cannot pin stale last-draw amounts.
+  await scrapeWaLotteryHome(data, true);
   await Promise.allSettled([
-    scrapeLotteryUsaWa(data),
-    fetchPowerballOfficial(data),
-    scrapeMegaMillions(data),
-    scrapeWaLotteryHome(data),
+    scrapeWaGamePages(data),
+    !data.mega ? scrapeMegaMillions(data) : Promise.resolve(),
+    !data.mega || !data.powerball ? scrapeLotteryNet(data) : Promise.resolve(),
   ]);
-  if (!data.mega || !data.powerball) await scrapeLotteryNet(data);
+  if (!data.mega || !data.powerball || !data.hit5 || !data.walotto) {
+    await scrapeLotteryUsaWa(data);
+  }
 
   if (data.mega || data.powerball || data.hit5 || data.walotto) {
     jackpotCache.current = { at: Date.now(), value: data };

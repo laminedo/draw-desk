@@ -63,6 +63,7 @@ export function Dashboard() {
   });
   const [tab, setTab] = useState<TabId>("overview");
   const [records, setRecords] = useState<DrawRecord[]>([]);
+  const [recordsGame, setRecordsGame] = useState<GameId | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [dataStatus, setDataStatus] = useState("Loading history…");
@@ -72,6 +73,7 @@ export function Dashboard() {
   const [tickets, setTickets] = useState<SavedTicket[]>([]);
   const [justSavedId, setJustSavedId] = useState<string | null>(null);
   const mergedRef = useRef(false);
+  const loadGen = useRef(0);
   const config = cfgOf(game);
   const hasBonus = config.hasBonus !== false;
 
@@ -80,13 +82,21 @@ export function Dashboard() {
     [records],
   );
 
-  const analysis = useMemo(
-    () => (records.length ? LottoEngine.getAnalysis(records, config) : null),
-    [records, config],
-  );
+  const analysis = useMemo(() => {
+    if (!records.length || recordsGame !== game) return null;
+    try {
+      return LottoEngine.getAnalysis(records, config);
+    } catch {
+      return null;
+    }
+  }, [records, recordsGame, game, config]);
 
   const setGame = (next: GameId) => {
+    if (next === game) return;
     setGameState(next);
+    setRecords([]);
+    setRecordsGame(null);
+    setLoading(true);
     try {
       localStorage.setItem(GAME_KEY, next);
     } catch {
@@ -132,20 +142,25 @@ export function Dashboard() {
   }, [user, isPending, refreshTickets]);
 
   const loadGame = useCallback(async (id: GameId, { silent } = { silent: false }) => {
+    const gen = ++loadGen.current;
     if (!silent) setLoading(true);
     try {
       const rows = await loadHistory(id);
+      if (gen !== loadGen.current) return;
       setRecords(rows);
+      setRecordsGame(id);
       setDataStatus(
         rows.length
           ? `${cfgOf(id).label}: ${rows.length.toLocaleString()} draws loaded`
           : "No data loaded yet.",
       );
     } catch {
+      if (gen !== loadGen.current) return;
       setRecords([]);
+      setRecordsGame(id);
       setDataStatus("Could not load history.");
     } finally {
-      setLoading(false);
+      if (gen === loadGen.current) setLoading(false);
     }
   }, []);
 
@@ -173,7 +188,7 @@ export function Dashboard() {
 
   useEffect(() => {
     void loadJackpots();
-    const t = window.setInterval(() => void loadJackpots(), 15 * 60 * 1000);
+    const t = window.setInterval(() => void loadJackpots(), 5 * 60 * 1000);
     return () => window.clearInterval(t);
   }, [loadJackpots]);
 
