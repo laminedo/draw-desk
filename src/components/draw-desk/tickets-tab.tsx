@@ -9,6 +9,7 @@ export function TicketsTab({
   records,
   tickets,
   signedIn,
+  alertsOn,
   justSavedId,
   onDelete,
   onOpenPredictor,
@@ -17,6 +18,7 @@ export function TicketsTab({
   records: DrawRecord[];
   tickets: SavedTicket[];
   signedIn: boolean;
+  alertsOn?: boolean;
   justSavedId: string | null;
   onDelete: (id: string) => void;
   onOpenPredictor: () => void;
@@ -48,7 +50,10 @@ export function TicketsTab({
           <Link to="/login" className="text-accent">
             Sign in
           </Link>
-        )}
+        )}{" "}
+        {alertsOn
+          ? "Jackpot and prize hits also send a notification on this device."
+          : "Allow notifications when prompted if you want an alert for jackpot or prize hits."}
       </p>
 
       {!tickets.length ? (

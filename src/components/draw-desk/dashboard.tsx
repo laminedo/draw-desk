@@ -11,7 +11,7 @@ import type {
   SavedTicket,
   TabId,
 } from "@/lib/lotto/types";
-import { formatNumber } from "@/lib/utils";
+import { formatMoney, formatNumber } from "@/lib/utils";
 import { AuthSlot } from "./auth-slot";
 import { OverviewTab } from "./overview-tab";
 import { AnalyzerTab } from "./analyzer-tab";
@@ -244,6 +244,7 @@ export function Dashboard() {
     }
     setJustSavedId(ticket.id);
     await refreshTickets();
+    requestWinAlerts();
     toast.success(`Saved ${picks.length} picks to Tickets`);
   }
 
@@ -285,6 +286,32 @@ export function Dashboard() {
   const uniqueWinners = winnerIndex.size;
   const remaining = Math.max(0, config.totalCombinations - uniqueWinners);
   const latest = records[0];
+  const ticketHitAlert = useMemo(
+    () =>
+      tickets.length && latest && recordsGame === game
+        ? describeTicketHit(tickets, latest, config)
+        : null,
+    [tickets, latest, recordsGame, game, config],
+  );
+
+  useEffect(() => {
+    if (!ticketHitAlert || !latest) return;
+    const key = `drawdesk-alert:${game}:${latest.drawDate}:${tickets.map((t) => t.id).join(",")}`;
+    try {
+      if (sessionStorage.getItem(key)) return;
+      sessionStorage.setItem(key, "1");
+    } catch {
+      /* continue and still toast once per mount */
+    }
+    if (ticketHitAlert.kind === "jackpot") {
+      toast.warning(ticketHitAlert.title, { description: ticketHitAlert.body, duration: 14000 });
+    } else if (ticketHitAlert.kind === "win") {
+      toast.success(ticketHitAlert.title, { description: ticketHitAlert.body, duration: 10000 });
+    } else {
+      toast.message(ticketHitAlert.title, { description: ticketHitAlert.body, duration: 8000 });
+    }
+    pushDeviceAlert(ticketHitAlert.title, ticketHitAlert.body);
+  }, [ticketHitAlert, game, latest, tickets]);
   const ticketCount = tickets.length;
   const newestByGame = (id: GameId) => {
     if (id === game && records[0]) return records[0].drawDate;
@@ -430,7 +457,15 @@ export function Dashboard() {
           >
             {t.label}
             {t.id === "tickets" && ticketCount > 0 && (
-              <span className="ml-1.5 inline-flex min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-[11px] font-semibold text-accent-fg">
+              <span
+                className={`ml-1.5 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold ${
+                  ticketHitAlert?.kind === "jackpot"
+                    ? "bg-warn text-white"
+                    : ticketHitAlert?.kind === "win"
+                      ? "bg-success text-white"
+                      : "bg-accent text-accent-fg"
+                }`}
+              >
                 {ticketCount}
               </span>
             )}
@@ -471,6 +506,7 @@ export function Dashboard() {
           records={records}
           tickets={tickets}
           signedIn={Boolean(user)}
+          alertsOn={alertsEnabled()}
           justSavedId={justSavedId}
           onDelete={(id) => void handleDeleteTicket(id)}
           onOpenPredictor={() => setTab("predictor")}
@@ -499,6 +535,94 @@ export function Dashboard() {
       </footer>
     </div>
   );
+}
+
+function requestWinAlerts() {
+  try {
+    if (typeof Notification !== "undefined" && Notification.permission === "default") {
+      void Notification.requestPermission();
+    }
+  } catch {
+    /* preview / unsupported */
+  }
+}
+
+function alertsEnabled() {
+  try {
+    return typeof Notification !== "undefined" && Notification.permission === "granted";
+  } catch {
+    return false;
+  }
+}
+
+function pushDeviceAlert(title: string, body: string) {
+  try {
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    new Notification(title, { body, tag: "draw-desk-win" });
+  } catch {
+    /* ignore */
+  }
+}
+
+type TicketHit = { kind: "jackpot" | "win" | "partial"; title: string; body: string };
+
+function describeTicketHit(
+  tickets: SavedTicket[],
+  latest: DrawRecord,
+  config: GameConfig,
+): TicketHit | null {
+  const v = LottoEngine.verifySavedTickets(tickets, latest, config) as {
+    hasJackpot: boolean;
+    hasWinningMatch: boolean;
+    winningPicksCount: number;
+    totalEstimatedPrize: number;
+    highestTier: { status?: string; tierName?: string } | null;
+    results: Array<{
+      verifiedPicks: Array<{
+        isWin: boolean;
+        whiteMatchCount: number;
+        matchedBonus: boolean;
+      }>;
+    }>;
+  };
+  const date = latest.drawDate;
+  if (v.hasJackpot) {
+    return {
+      kind: "jackpot",
+      title: `${config.label} jackpot match`,
+      body: `A saved combination hit every number on ${date}. Open Tickets.`,
+    };
+  }
+  if (v.hasWinningMatch) {
+    const prize =
+      v.totalEstimatedPrize > 0 ? ` About ${formatMoney(v.totalEstimatedPrize)}.` : "";
+    const label = v.highestTier?.tierName || v.highestTier?.status || "prize hit";
+    return {
+      kind: "win",
+      title: `${config.label} ${label}`,
+      body: `${v.winningPicksCount} saved pick${v.winningPicksCount === 1 ? "" : "s"} won on ${date}.${prize}`,
+    };
+  }
+  let best = 0;
+  let bonus = false;
+  for (const row of v.results || []) {
+    for (const pick of row.verifiedPicks || []) {
+      if (pick.whiteMatchCount > best) {
+        best = pick.whiteMatchCount;
+        bonus = Boolean(pick.matchedBonus);
+      } else if (pick.whiteMatchCount === best && pick.matchedBonus) {
+        bonus = true;
+      }
+    }
+  }
+  if (best >= 2 || (best >= 1 && bonus && config.hasBonus !== false)) {
+    return {
+      kind: "partial",
+      title: `${config.label} partial match`,
+      body: `A saved pick matched ${best} number${best === 1 ? "" : "s"}${bonus ? ` + ${config.ballLabel}` : ""} on ${date}.`,
+    };
+  }
+  return null;
 }
 
 function Kpi({
