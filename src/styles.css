@@ -1,0 +1,129 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #f5f5f7;
+  --color-surface: #ffffff;
+  --color-fg: #1d1d1f;
+  --color-muted: #6e6e73;
+  --color-subtle: #86868b;
+  --color-accent: #0071e3;
+  --color-accent-fg: #ffffff;
+  --color-border: #d2d2d7;
+  --color-success: #248a3d;
+  --color-danger: #e30000;
+  --color-warn: #b25000;
+  --color-bonus: #c41e3a;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+    system-ui, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI",
+    system-ui, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+}
+
+@layer base {
+  html {
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--color-bg);
+    color: var(--color-fg);
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  input,
+  textarea,
+  select {
+    font-family: inherit;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.ball {
+  display: inline-grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 9999px;
+  background: var(--color-surface);
+  color: var(--color-fg);
+  border: 1px solid var(--color-border);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 0.8rem;
+  box-shadow: 0 1px 1px rgb(0 0 0 / 0.04);
+}
+
+.ball.mega,
+.ball.bonus {
+  background: var(--color-bonus);
+  color: #fff;
+  border-color: transparent;
+}
+
+.ball.match {
+  outline: 2px solid var(--color-success);
+  outline-offset: 1px;
+}
+
+.ball.mini {
+  width: 1.75rem;
+  height: 1.75rem;
+  font-size: 0.7rem;
+}
+
+.heatmap-cell {
+  aspect-ratio: 1;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  font-size: 0.7rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-fg);
+}
+
+.legend-bar {
+  display: inline-block;
+  width: 120px;
+  height: 8px;
+  border-radius: 99px;
+  background: linear-gradient(90deg, #e8e8ed, #0071e3);
+}
+
+.pb-track {
+  flex: 1;
+  height: 6px;
+  border-radius: 99px;
+  background: #e8e8ed;
+  overflow: hidden;
+}
+
+.pb-fill {
+  height: 100%;
+  border-radius: 99px;
+  background: var(--color-accent);
+}
